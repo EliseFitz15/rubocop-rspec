@@ -47,6 +47,17 @@ module RuboCop
           check_let_declarations(node.body) if multiline_block?(node.body)
         end
 
+        def autocorrect(node)
+          lambda do |corrector|
+            first_example = find_first_example(node.parent)
+            first_example_pos = first_example.loc.expression
+            indent = "\n" + ' ' * first_example.loc.column
+
+            corrector.insert_before(first_example_pos, source(node) + indent)
+            corrector.remove(node_range_with_surrounding_space(node))
+          end
+        end
+
         private
 
         def multiline_block?(block)
@@ -54,15 +65,42 @@ module RuboCop
         end
 
         def check_let_declarations(node)
-          example_found = false
+          first_example = find_first_example(node)
+          return unless first_example
 
           node.each_child_node do |child|
-            if let?(child)
-              add_offense(child, location: :expression) if example_found
-            elsif example_or_group?(child)
-              example_found = true
-            end
+            next if child.sibling_index < first_example.sibling_index
+            add_offense(child, location: :expression) if let?(child)
           end
+        end
+
+        def find_first_example(node)
+          node.children.find { |sibling| example_or_group?(sibling) }
+        end
+
+        def node_range_with_surrounding_space(node)
+          range = node_range(node)
+          range = range_with_surrounding_space(range, :left, false)
+          range = range_with_surrounding_space(range, :right, true)
+          range
+        end
+
+        def source(node)
+          node_range(node).source
+        end
+
+        def node_range(node)
+          range_between(node.loc.expression.begin_pos, last_node_loc(node))
+        end
+
+        def last_node_loc(node)
+          heredoc = node.body
+            .each_child_node
+            .find { |n| n.loc.respond_to?(:heredoc_body) }
+
+          return heredoc.loc.heredoc_end.end_pos if heredoc
+
+          node.loc.end.end_pos
         end
       end
     end
